@@ -1,0 +1,21 @@
+# uv / Python
+.venv/
+__pycache__/
+*.pyc
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+
+# Defense in depth — credentials live in ~/.mcp-credentials/, not here
+*.env
+!*.env.example
+client_secret*.json
+credentials/
+
+# Local backups
+*.bak
+*.bak-*
+*.local
+*.local.*
