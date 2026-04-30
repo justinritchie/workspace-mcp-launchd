@@ -16,7 +16,16 @@
 #                                                          OAuth refresh tokens land here)
 #
 # Optional in the env file:
-#   WORKSPACE_MCP_TOOLS  — space-separated list (default: "gmail drive calendar docs sheets tasks")
+#   WORKSPACE_MCP_TOOLS         — space-separated list (default: "gmail drive calendar docs sheets tasks")
+#   WORKSPACE_MCP_TOOL_SUFFIX   — appended to every registered tool name (e.g. "_xe")
+#                                  Lets multiple instances of this server run in the
+#                                  same Claude Desktop without colliding tool names.
+#   WORKSPACE_MCP_TOOL_DENYLIST — comma-separated list of tool function names to skip
+#                                  registering. A sensible default (rarely-used
+#                                  dev/admin tools) is set below if not provided.
+#   WORKSPACE_MCP_FORK_DIR      — path to the patched fork (default: sibling
+#                                  ../google_workspace_mcp). Override only if you
+#                                  keep the fork in a non-default location.
 set -euo pipefail
 
 if [[ $# -ne 1 ]]; then
@@ -59,6 +68,25 @@ mkdir -p "$GOOGLE_MCP_CREDENTIALS_DIR"
 # Tools default to all six (gmail/drive/calendar/docs/sheets/tasks)
 TOOLS="${WORKSPACE_MCP_TOOLS:-gmail drive calendar docs sheets tasks}"
 
+# Default denylist for the patched fork — rarely-used dev/admin tools. Per-account
+# env files can override by setting WORKSPACE_MCP_TOOL_DENYLIST explicitly.
+export WORKSPACE_MCP_TOOL_DENYLIST="${WORKSPACE_MCP_TOOL_DENYLIST:-debug_docs_runtime_info,debug_table_structure,inspect_doc_structure,manage_focus_time,manage_out_of_office,query_freebusy,start_google_auth}"
+
+# Tool name suffix is empty by default — set it per account in the env file
+# (e.g. WORKSPACE_MCP_TOOL_SUFFIX="_xe") to let multiple instances coexist
+# without tool-name collisions across Claude Desktop connectors.
+export WORKSPACE_MCP_TOOL_SUFFIX="${WORKSPACE_MCP_TOOL_SUFFIX:-}"
+
+# Default fork location (sibling repo). Override via env file if needed.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FORK_DIR="${WORKSPACE_MCP_FORK_DIR:-${SCRIPT_DIR}/../google_workspace_mcp}"
+if [[ ! -f "$FORK_DIR/main.py" ]]; then
+  echo "ERROR: patched fork not found at $FORK_DIR (expected main.py)" >&2
+  echo "Set WORKSPACE_MCP_FORK_DIR or place justinritchie/google_workspace_mcp" >&2
+  echo "alongside this repo." >&2
+  exit 65
+fi
+
 # Refuse to start if port is already bound.
 if lsof -i ":$WORKSPACE_MCP_PORT" -sTCP:LISTEN -t >/dev/null 2>&1; then
   echo "Port $WORKSPACE_MCP_PORT is already in use. PID(s):"
@@ -69,11 +97,16 @@ fi
 echo "Starting google-${ACCOUNT} workspace-mcp on http://localhost:${WORKSPACE_MCP_PORT}/mcp"
 echo "Account:        $USER_GOOGLE_EMAIL"
 echo "Credentials:    $GOOGLE_MCP_CREDENTIALS_DIR"
+echo "Fork:           $FORK_DIR"
 echo "Tools:          $TOOLS"
+echo "Tool suffix:    ${WORKSPACE_MCP_TOOL_SUFFIX:-(none)}"
+echo "Tool denylist:  $WORKSPACE_MCP_TOOL_DENYLIST"
 echo
 
+# Run the patched fork from a local checkout via uv. uv resolves and caches
+# dependencies on first run; subsequent launches are fast.
 # shellcheck disable=SC2086
-exec uvx workspace-mcp \
+exec uv run --project "$FORK_DIR" python "$FORK_DIR/main.py" \
   --single-user \
   --transport streamable-http \
   --tools $TOOLS
